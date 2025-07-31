@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
+from app.api import api_router
 
 app = FastAPI(
-    title="NL2SQL Service",
+    title=settings.APP_NAME,
     description="API Service for Natural Language to SQL conversion using Google Gemini",
-    version="1.0.0"
+    version=settings.APP_VERSION
 )
 
 # Configure CORS
@@ -16,14 +18,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include API router
+app.include_router(api_router, prefix="/api/v1")
+
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to NL2SQL Service",
+        "message": f"Welcome to {settings.APP_NAME}",
         "status": "active",
-        "version": "1.0.0"
+        "version": settings.APP_VERSION
     }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG
+    )
