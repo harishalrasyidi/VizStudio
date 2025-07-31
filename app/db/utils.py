@@ -2,9 +2,11 @@ from typing import List, Dict
 from sqlalchemy import text
 from .database import get_db_connection
 
-def get_table_schema() -> List[Dict]:
+def get_table_schema(schema_name: str = 'public') -> List[Dict]:
     """
     Mendapatkan informasi skema dari semua tabel di database.
+    Args:
+        schema_name: Nama schema database (default: 'public')
     Returns:
         List[Dict]: List dari informasi tabel yang berisi:
             - table_name: Nama tabel
@@ -27,7 +29,7 @@ def get_table_schema() -> List[Dict]:
                 information_schema.tables t
                 JOIN information_schema.columns c ON t.table_name = c.table_name
             WHERE 
-                t.table_schema = 'public'
+                t.table_schema = :schema_name
                 AND t.table_type = 'BASE TABLE'
             ORDER BY 
                 t.table_name, 
@@ -51,7 +53,7 @@ def get_table_schema() -> List[Dict]:
         """)
 
         # Eksekusi queries
-        columns = conn.execute(column_query).fetchall()
+        columns = conn.execute(column_query, {"schema_name": schema_name}).fetchall()
         foreign_keys = conn.execute(fk_query).fetchall()
 
         # Organize data by table
@@ -89,16 +91,21 @@ def get_table_schema() -> List[Dict]:
 
         return list(schema_info.values())
 
-def get_table_sample_data(table_name: str, limit: int = 5) -> List[Dict]:
+def get_table_sample_data(table_name: str, schema_name: str = 'public', limit: int = 5) -> List[Dict]:
     """
     Mendapatkan sampel data dari tabel tertentu.
     Args:
         table_name: Nama tabel
+        schema_name: Nama schema database (default: 'public')
         limit: Jumlah baris yang akan diambil
     Returns:
         List[Dict]: List dari baris data
     """
     with get_db_connection() as conn:
-        query = text(f"SELECT * FROM {table_name} LIMIT :limit")
-        result = conn.execute(query, {"limit": limit}).fetchall()
-        return [dict(row) for row in result]
+        try:
+            query = text(f'SELECT * FROM "{schema_name}"."{table_name}" LIMIT :limit')
+            result = conn.execute(query, {"limit": limit}).fetchall()
+            return [dict(row._mapping) for row in result]
+        except Exception as e:
+            print(f"Error getting sample data: {str(e)}")
+            return []

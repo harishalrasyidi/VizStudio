@@ -9,7 +9,7 @@ class NL2SQLService:
     def __init__(self):
         # Inisialisasi model Gemini
         self.llm = GoogleGenerativeAI(
-            model="gemini-1.5-pro",
+            model="gemini-2.0-flash",
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0.1  # Rendah untuk hasil yang lebih deterministik
         )
