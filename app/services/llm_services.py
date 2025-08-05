@@ -15,8 +15,8 @@ def analyze_data_with_llm(data: list[dict]) -> str:
     llm = GoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=settings.GOOGLE_API_KEY)
     prompt_template = PromptTemplate(
         input_variables=["data"],
-        template="Anda adalah analis data. Berikan analisis tekstual singkat dari data berikut: {data}. Fokus pada tren, pola, atau insight penting."
+        template="Anda adalah analis data profesional. Berdasarkan data berikut dalam format list of dictionaries: {data}, berikan analisis tekstual yang sangat singkat dan langsung ke intinya. Fokus pada nilai tertinggi, total, atau tren utama yang terlihat dalam data. Jika data hanya satu entri, sampaikan nilai tersebut. Jika data kosong, beri pesan 'Tidak ada data untuk dianalisis.'"
     )
     chain = prompt_template | llm
     result = chain.invoke({"data": str(data)})
-    return result
+    return result.strip()
