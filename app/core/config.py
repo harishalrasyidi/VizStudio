@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     DB_USER: str
     DB_PASSWORD: str
 
+    # LangSmith Settings
+    LANGCHAIN_API_KEY: Optional[str] = None
+    LANGCHAIN_TRACING_V2: Optional[bool] = None
+    LANGCHAIN_PROJECT: Optional[str] = None
+    LANGSMITH_ENDPOINT: Optional[str] = None
+
     class Config:
         env_file = ".env"
 
