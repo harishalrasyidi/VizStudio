@@ -11,7 +11,7 @@ class NL2SQLRequest(BaseModel):
         table_names (Optional[list[str]]): List nama tabel yang relevan (opsional)
     """
     prompt: str = Field(
-        ...,  # ... berarti field ini required
+        ...,
         description="Prompt dalam bahasa natural (Bahasa Indonesia)",
         example="tampilkan total penjualan per kategori tahun 2023"
     )
@@ -32,6 +32,7 @@ class NL2SQLResponse(BaseModel):
         sql_query (str): Query SQL yang dihasilkan
         confidence_score (float): Skor kepercayaan dari model (0-1)
         explanation (Optional[str]): Penjelasan tentang query yang dihasilkan
+        analysis (Optional[str]): Analisis tekstual dari data query
     """
     sql_query: str = Field(
         ...,
@@ -41,8 +42,8 @@ class NL2SQLResponse(BaseModel):
     confidence_score: float = Field(
         ...,
         description="Skor kepercayaan dari model (0-1)",
-        ge=0.0,  # greater than or equal to 0
-        le=1.0,  # less than or equal to 1
+        ge=0.0,
+        le=1.0,
         example=0.95
     )
     explanation: Optional[str] = Field(
@@ -50,12 +51,18 @@ class NL2SQLResponse(BaseModel):
         description="Penjelasan tentang query yang dihasilkan",
         example="Query ini akan menghitung total penjualan untuk setiap kategori di tahun 2023"
     )
+    analysis: Optional[str] = Field(
+        None,
+        description="Analisis tekstual dari data query",
+        example="Berdasarkan data, kategori 'Electronics' memiliki penjualan tertinggi di tahun 2023."
+    )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "sql_query": "SELECT category, SUM(sales) as total_sales FROM sales WHERE YEAR(date) = 2023 GROUP BY category",
                 "confidence_score": 0.95,
-                "explanation": "Query ini akan menghitung total penjualan untuk setiap kategori di tahun 2023"
+                "explanation": "Query ini akan menghitung total penjualan untuk setiap kategori di tahun 2023",
+                "analysis": "Berdasarkan data, kategori 'Electronics' memiliki penjualan tertinggi di tahun 2023."
             }
         }
