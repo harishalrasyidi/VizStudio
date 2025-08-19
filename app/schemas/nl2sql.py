@@ -23,6 +23,7 @@ class NL2SQLRequest(BaseModel):
         None,
         description="List nama tabel yang relevan (opsional)"
     )
+    
 
 class NL2SQLResponse(BaseModel):
     """
