@@ -4,6 +4,8 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from app.core.config import settings
 from app.db.utils import get_table_schema, get_table_sample_data
+import sqlparse
+import re
 
 class NL2SQLService:
     def __init__(self):
@@ -14,25 +16,27 @@ class NL2SQLService:
             temperature=0.1  # Rendah untuk hasil yang lebih deterministik
         )
         
-        # Template prompt untuk konversi NL ke SQL
+        # Template prompt yang ditingkatkan untuk BI
         self.prompt_template = PromptTemplate(
-            input_variables=["schema_info", "sample_data", "user_prompt"],
-            template="""Kamu adalah SQL expert yang akan mengubah prompt bahasa Indonesia menjadi query SQL yang valid.
+            input_variables=["database_name", "schema_info", "sample_data", "user_prompt"],
+            template="""Anda adalah asisten Business Intelligence yang ahli dalam mengonversi pertanyaan bahasa alami dalam bahasa Indonesia menjadi query SQL yang valid dan efisien untuk PostgreSQL. Tujuan Anda adalah menghasilkan query SQL yang dapat digunakan untuk analisis data dan visualisasi Business Intelligence, seperti laporan, dashboard, atau grafik. Query yang dihasilkan harus akurat, menggunakan skema database yang diberikan, dan dioptimalkan untuk performa serta kejelasan hasil untuk visualisasi.
 
 KONTEKS DATABASE:
-{schema_info}
-
-CONTOH DATA:
-{sample_data}
+- Nama Database: {database_name}
+- Skema: {schema_info}
+- Sampel Data: {sample_data}
 
 ATURAN:
-1. Gunakan nama tabel dan kolom yang TEPAT sesuai skema
-2. Hasilkan HANYA query SQL, tanpa penjelasan
-3. Pastikan query valid untuk PostgreSQL
-4. Gunakan best practice SQL (aliasing, proper joins, dll)
-5. Jangan gunakan kolom yang tidak ada di skema
+1. Hasilkan HANYA query SQL yang valid untuk PostgreSQL, tanpa penjelasan tambahan dalam output.
+2. Gunakan nama tabel dan kolom yang TEPAT sesuai skema yang diberikan.
+3. Pastikan query efisien dan sesuai untuk visualisasi BI (misal, gunakan agregasi, grouping, atau sorting untuk hasil yang jelas).
+4. Jika prompt meminta visualisasi (misal, tren, perbandingan, atau total), strukturkan query untuk menghasilkan data yang mudah divisualisasikan (misal, kolom terbatas, hasil terurut).
+5. Gunakan best practice SQL: alias yang jelas, join eksplisit, hindari kolom yang tidak ada di skema.
+6. Jika prompt ambigu, buat asumsi logis berdasarkan skema dan sampel data, prioritaskan hasil yang relevan untuk BI.
+7. Tangani kasus kompleks seperti join, subquery, atau window function jika diperlukan oleh prompt.
 
-PROMPT: {user_prompt}
+PROMPT PENGGUNA:
+{user_prompt}
 
 SQL Query:"""
         )
@@ -73,6 +77,32 @@ SQL Query:"""
         
         return sample_text
 
+    def _clean_sql_query(self, raw_query: str, single_line: bool = False) -> str:
+        """Membersihkan output query SQL dari backtick, Markdown, dan format ulang untuk kejelasan."""
+        # Hapus backtick, penanda Markdown (```sql atau ```), dan semicolon tambahan
+        cleaned_query = re.sub(r'```sql|```|;+\s*$', '', raw_query)
+        
+        # Hapus baris kosong berlebih dan normalisasi whitespace
+        cleaned_query = ' '.join(line.strip() for line in cleaned_query.splitlines() if line.strip())
+        
+        # Format ulang query menggunakan sqlparse
+        formatted_query = sqlparse.format(
+            cleaned_query,
+            reindent=True,           # Indentasi rapi
+            keyword_case='upper',    # Kata kunci SQL huruf besar
+            identifier_case='lower', # Identifier huruf kecil
+            indent_width=2,          # Indentasi 2 spasi
+            use_space_around_operators=True, # Spasi di sekitar operator
+            wrap_after=80            # Batas lebar baris
+        )
+        
+        # Jika single_line=True, ubah ke satu baris
+        if single_line:
+            formatted_query = ' '.join(formatted_query.split())
+        
+        # Hapus whitespace berlebih di akhir
+        return formatted_query.strip()
+
     async def generate_sql(
         self,
         prompt: str,
@@ -106,22 +136,25 @@ SQL Query:"""
             table_data = get_table_sample_data(table['table_name'], limit=3)
             sample_data += self._format_sample_data(table['table_name'], table_data)
         
+        # Gunakan nama database dari input atau default ke konfigurasi
+        db_name = database_name if database_name else settings.DB_NAME
+        
         # Generate SQL menggunakan LangChain
         result = await self.chain.ainvoke({
+            "database_name": db_name,
             "schema_info": schema_info,
             "sample_data": sample_data,
             "user_prompt": prompt
         })
         
-        # Extract SQL query dan bersihkan
-        sql_query = result['text'].strip()
+        # Extract SQL query dan bersihkan (default multi-line)
+        sql_query = self._clean_sql_query(result['text'], single_line=False)
         
-        # Hitung confidence score sederhana berdasarkan panjang query
-        # dan keberadaan klausa umum
+        # Hitung confidence score sederhana
         confidence_score = min(1.0, len(sql_query) / 50)  # Base score
         common_clauses = ['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY']
         for clause in common_clauses:
-            if clause in sql_query:
+            if clause in sql_query.upper():
                 confidence_score += 0.1
         confidence_score = min(1.0, confidence_score)
         

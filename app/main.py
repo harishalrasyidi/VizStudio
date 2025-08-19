@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import api_router
+from app.core.langsmith import langsmith_client  # Impor variabel global
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 app = FastAPI(
     title=settings.APP_NAME,
