@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 class NL2SQLRequest(BaseModel):
     """
@@ -7,7 +7,7 @@ class NL2SQLRequest(BaseModel):
     
     Attributes:
         prompt (str): Prompt dalam bahasa natural (Bahasa Indonesia)
-        database_name (Optional[str]): Nama database yang akan diquery (opsional)
+        id_datasource (int): ID unik untuk datasource yang akan diquery
         table_names (Optional[list[str]]): List nama tabel yang relevan (opsional)
     """
     prompt: str = Field(
@@ -15,15 +15,15 @@ class NL2SQLRequest(BaseModel):
         description="Prompt dalam bahasa natural (Bahasa Indonesia)",
         example="tampilkan total penjualan per kategori tahun 2023"
     )
-    database_name: Optional[str] = Field(
-        None,
-        description="Nama database yang akan diquery (opsional)"
+    id_datasource: int = Field(
+        ...,
+        description="ID unik untuk datasource yang akan diquery",
+        example=123
     )
-    table_names: Optional[list[str]] = Field(
+    table_names: Optional[List[str]] = Field(
         None,
         description="List nama tabel yang relevan (opsional)"
     )
-    
 
 class NL2SQLResponse(BaseModel):
     """

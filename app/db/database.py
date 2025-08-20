@@ -9,17 +9,17 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Membuat URL koneksi database
+# Koneksi ke database toolsBI untuk mengakses tabel datasource
 SQLALCHEMY_DATABASE_URL = (
     f"postgresql://{settings.DB_USER}:{settings.DB_PASSWORD}@"
     f"{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
 )
 
-# Membuat engine database dengan logging
+# Membuat engine untuk database toolsBI
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    echo=settings.DEBUG,  # Log SQL statements when in debug mode
-    pool_pre_ping=True,   # Enable connection health checks
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
 )
 
 @event.listens_for(Engine, "connect")
@@ -34,8 +34,7 @@ Base = declarative_base()
 
 def get_db():
     """
-    Generator fungsi untuk mendapatkan database session.
-    Memastikan session selalu ditutup setelah digunakan.
+    Generator fungsi untuk mendapatkan database session ke toolsBI.
     """
     db = SessionLocal()
     try:
@@ -45,8 +44,7 @@ def get_db():
 
 def get_db_connection():
     """
-    Fungsi untuk mendapatkan koneksi database langsung.
-    Berguna untuk eksekusi raw SQL query.
+    Fungsi untuk mendapatkan koneksi langsung ke database toolsBI.
     """
     try:
         connection = engine.connect()
