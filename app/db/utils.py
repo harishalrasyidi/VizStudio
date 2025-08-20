@@ -1,111 +1,130 @@
 from typing import List, Dict
-from sqlalchemy import text
-from .database import get_db_connection
+from sqlalchemy import text, create_engine
+from fastapi import HTTPException
+from app.services.db_services import get_datasource_info
 
-def get_table_schema(schema_name: str = 'public') -> List[Dict]:
+def get_table_schema(id_datasource: int, schema_name: str = 'public') -> List[Dict]:
     """
-    Mendapatkan informasi skema dari semua tabel di database.
+    Mendapatkan informasi skema dari semua tabel di database berdasarkan id_datasource.
+    
     Args:
-        schema_name: Nama schema database (default: 'public')
+        id_datasource (int): ID unik datasource.
+        schema_name (str): Nama schema database (default: 'public').
+    
     Returns:
-        List[Dict]: List dari informasi tabel yang berisi:
-            - table_name: Nama tabel
-            - columns: List dari informasi kolom (nama, tipe data, constraints)
-            - relationships: List dari foreign key relationships
+        List[Dict]: List dari informasi tabel (table_name, columns, relationships).
     """
-    with get_db_connection() as conn:
-        # Query untuk mendapatkan informasi kolom
-        column_query = text("""
-            SELECT 
-                t.table_name,
-                c.column_name,
-                c.data_type,
-                c.column_default,
-                c.is_nullable,
-                c.character_maximum_length,
-                c.numeric_precision,
-                c.numeric_scale
-            FROM 
-                information_schema.tables t
-                JOIN information_schema.columns c ON t.table_name = c.table_name
-            WHERE 
-                t.table_schema = :schema_name
-                AND t.table_type = 'BASE TABLE'
-            ORDER BY 
-                t.table_name, 
-                c.ordinal_position;
-        """)
-        
-        # Query untuk mendapatkan informasi foreign key
-        fk_query = text("""
-            SELECT
-                tc.table_name,
-                kcu.column_name,
-                ccu.table_name AS foreign_table_name,
-                ccu.column_name AS foreign_column_name
-            FROM 
-                information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                    ON tc.constraint_name = kcu.constraint_name
-                JOIN information_schema.constraint_column_usage ccu
-                    ON ccu.constraint_name = tc.constraint_name
-            WHERE tc.constraint_type = 'FOREIGN KEY';
-        """)
-
-        # Eksekusi queries
-        columns = conn.execute(column_query, {"schema_name": schema_name}).fetchall()
-        foreign_keys = conn.execute(fk_query).fetchall()
-
-        # Organize data by table
-        schema_info = {}
-        
-        # Process columns
-        for col in columns:
-            table_name = col.table_name
-            if table_name not in schema_info:
-                schema_info[table_name] = {
-                    "table_name": table_name,
-                    "columns": [],
-                    "relationships": []
-                }
+    try:
+        datasource_info = get_datasource_info(id_datasource)
+        db_url = (
+            f"postgresql://{datasource_info['user']}:{datasource_info['password']}@"
+            f"{datasource_info['host']}:{datasource_info['port']}/{datasource_info['db_name']}"
+        )
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            # Query untuk mendapatkan informasi kolom
+            column_query = text("""
+                SELECT 
+                    t.table_name,
+                    c.column_name,
+                    c.data_type,
+                    c.column_default,
+                    c.is_nullable,
+                    c.character_maximum_length,
+                    c.numeric_precision,
+                    c.numeric_scale
+                FROM 
+                    information_schema.tables t
+                    JOIN information_schema.columns c ON t.table_name = c.table_name
+                WHERE 
+                    t.table_schema = :schema_name
+                    AND t.table_type = 'BASE TABLE'
+                ORDER BY 
+                    t.table_name, 
+                    c.ordinal_position;
+            """)
             
-            schema_info[table_name]["columns"].append({
-                "name": col.column_name,
-                "type": col.data_type,
-                "nullable": col.is_nullable == "YES",
-                "default": col.column_default,
-                "max_length": col.character_maximum_length,
-                "numeric_precision": col.numeric_precision,
-                "numeric_scale": col.numeric_scale
-            })
+            # Query untuk mendapatkan informasi foreign key
+            fk_query = text("""
+                SELECT
+                    tc.table_name,
+                    kcu.column_name,
+                    ccu.table_name AS foreign_table_name,
+                    ccu.column_name AS foreign_column_name
+                FROM 
+                    information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name
+                    JOIN information_schema.constraint_column_usage ccu
+                        ON ccu.constraint_name = tc.constraint_name
+                WHERE tc.constraint_type = 'FOREIGN KEY';
+            """)
 
-        # Process foreign keys
-        for fk in foreign_keys:
-            table_name = fk.table_name
-            if table_name in schema_info:
-                schema_info[table_name]["relationships"].append({
-                    "column": fk.column_name,
-                    "foreign_table": fk.foreign_table_name,
-                    "foreign_column": fk.foreign_column_name
+            # Eksekusi queries
+            columns = conn.execute(column_query, {"schema_name": schema_name}).fetchall()
+            foreign_keys = conn.execute(fk_query).fetchall()
+
+            # Organize data by table
+            schema_info = {}
+            
+            # Process columns
+            for col in columns:
+                table_name = col.table_name
+                if table_name not in schema_info:
+                    schema_info[table_name] = {
+                        "table_name": table_name,
+                        "columns": [],
+                        "relationships": []
+                    }
+                
+                schema_info[table_name]["columns"].append({
+                    "name": col.column_name,
+                    "type": col.data_type,
+                    "nullable": col.is_nullable == "YES",
+                    "default": col.column_default,
+                    "max_length": col.character_maximum_length,
+                    "numeric_precision": col.numeric_precision,
+                    "numeric_scale": col.numeric_scale
                 })
 
-        return list(schema_info.values())
+            # Process foreign keys
+            for fk in foreign_keys:
+                table_name = fk.table_name
+                if table_name in schema_info:
+                    schema_info[table_name]["relationships"].append({
+                        "column": fk.column_name,
+                        "foreign_table": fk.foreign_table_name,
+                        "foreign_column": fk.foreign_column_name
+                    })
 
-def get_table_sample_data(table_name: str, schema_name: str = 'public', limit: int = 5) -> List[Dict]:
+            return list(schema_info.values())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching table schema: {str(e)}")
+
+def get_table_sample_data(table_name: str, id_datasource: int, schema_name: str = 'public', limit: int = 5) -> List[Dict]:
     """
-    Mendapatkan sampel data dari tabel tertentu.
+    Mendapatkan sampel data dari tabel tertentu berdasarkan id_datasource.
+    
     Args:
-        table_name: Nama tabel
-        schema_name: Nama schema database (default: 'public')
-        limit: Jumlah baris yang akan diambil
+        table_name (str): Nama tabel.
+        id_datasource (int): ID unik datasource.
+        schema_name (str): Nama schema database (default: 'public').
+        limit (int): Jumlah baris yang akan diambil.
+    
     Returns:
-        List[Dict]: List dari baris data
+        List[Dict]: List dari baris data.
     """
-    with get_db_connection() as conn:
-        try:
+    try:
+        datasource_info = get_datasource_info(id_datasource)
+        db_url = (
+            f"postgresql://{datasource_info['user']}:{datasource_info['password']}@"
+            f"{datasource_info['host']}:{datasource_info['port']}/{datasource_info['db_name']}"
+        )
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
             query = text(f'SELECT * FROM "{schema_name}"."{table_name}" LIMIT :limit')
             result = conn.execute(query, {"limit": limit}).fetchall()
             return [dict(row._mapping) for row in result]
-        except Exception as e:
-            print(f"Error getting sample data: {str(e)}")
-            return []
+    except Exception as e:
+        print(f"Error getting sample data: {str(e)}")
+        return []

@@ -19,7 +19,7 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
     Mengkonversi prompt bahasa natural menjadi query SQL dan memberikan analisis tekstual.
     
     Args:
-        request: Request body yang berisi prompt dan parameter opsional
+        request: Request body yang berisi prompt, id_datasource, dan parameter opsional
         
     Returns:
         NL2SQLResponse: Response yang berisi query SQL, skor kepercayaan, penjelasan, dan analisis tekstual
@@ -33,7 +33,7 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
         try:
             run = langsmith_client.create_run(
                 name="nl2sql_conversion",
-                inputs={"prompt": request.prompt, "database_name": request.database_name, "table_names": request.table_names},
+                inputs={"prompt": request.prompt, "id_datasource": request.id_datasource, "table_names": request.table_names},
                 run_type="chain"
             )
             if run is None:
@@ -46,7 +46,7 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
         # Generate SQL query
         sql_query, confidence_score = await nl2sql_service.generate_sql(
             prompt=request.prompt,
-            database_name=request.database_name,
+            id_datasource=request.id_datasource,
             table_names=request.table_names
         )
         
@@ -57,9 +57,8 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             )
 
         # Eksekusi query untuk mendapatkan data
-        db_name = request.database_name if request.database_name else db_name
         try:
-            data = execute_query(sql_query, db_name)
+            data = execute_query(sql_query, request.id_datasource)
             analysis = analyze_data_with_llm(data) if data else "Tidak ada data yang tersedia untuk dianalisis."
         except Exception as e:
             logger.error(f"Error executing query {sql_query}: {str(e)}")

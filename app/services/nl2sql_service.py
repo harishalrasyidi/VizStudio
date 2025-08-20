@@ -4,6 +4,7 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from app.core.config import settings
 from app.db.utils import get_table_schema, get_table_sample_data
+from app.services.db_services import get_datasource_info
 import sqlparse
 import re
 
@@ -29,11 +30,19 @@ KONTEKS DATABASE:
 ATURAN:
 1. Hasilkan HANYA query SQL yang valid untuk PostgreSQL, tanpa penjelasan tambahan dalam output.
 2. Gunakan nama tabel dan kolom yang TEPAT sesuai skema yang diberikan.
-3. Pastikan query efisien dan sesuai untuk visualisasi BI (misal, gunakan agregasi, grouping, atau sorting untuk hasil yang jelas).
-4. Jika prompt meminta visualisasi (misal, tren, perbandingan, atau total), strukturkan query untuk menghasilkan data yang mudah divisualisasikan (misal, kolom terbatas, hasil terurut).
-5. Gunakan best practice SQL: alias yang jelas, join eksplisit, hindari kolom yang tidak ada di skema.
-6. Jika prompt ambigu, buat asumsi logis berdasarkan skema dan sampel data, prioritaskan hasil yang relevan untuk BI.
-7. Tangani kasus kompleks seperti join, subquery, atau window function jika diperlukan oleh prompt.
+3. Jika tidak ada tabel spesifik yang disebutkan, pilih tabel yang paling relevan berdasarkan prompt dan skema.
+4. Pastikan query efisien dan sesuai untuk visualisasi BI (misal, gunakan agregasi, grouping, atau sorting untuk hasil yang jelas).
+5. Jika prompt meminta visualisasi (misal, tren, perbandingan, atau total), strukturkan query untuk menghasilkan data yang mudah divisualisasikan (misal, kolom terbatas, hasil terurut).
+6. Gunakan best practice SQL: alias yang jelas, join eksplisit, hindari kolom yang tidak ada di skema.
+7. Jika prompt ambigu, buat asumsi logis berdasarkan skema dan sampel data, prioritaskan hasil yang relevan untuk BI.
+8. Tangani kasus kompleks seperti join, subquery, atau window function jika diperlukan oleh prompt.
+
+CONTOH:
+Prompt: "Top 10 produk terlaris"
+SQL: SELECT product_name, SUM(quantity_sold) as total_sold FROM sales GROUP BY product_name ORDER BY total_sold DESC LIMIT 10;
+
+Prompt: "Tampilkan total penjualan per kategori tahun 2023"
+SQL: SELECT c.category_name, SUM(s.quantity_sold) as total_sales FROM sales s JOIN categories c ON s.category_id = c.category_id WHERE YEAR(s.sale_date) = 2023 GROUP BY c.category_name;
 
 PROMPT PENGGUNA:
 {user_prompt}
@@ -66,12 +75,10 @@ SQL Query:"""
             return f"Tidak ada sampel data untuk tabel {table_name}"
         
         sample_text = f"\nSAMPEL DATA {table_name}:\n"
-        # Header
         headers = data[0].keys()
         sample_text += "| " + " | ".join(headers) + " |\n"
         sample_text += "|" + "|".join(["-" * len(h) for h in headers]) + "|\n"
         
-        # Data
         for row in data:
             sample_text += "| " + " | ".join(str(row[h]) for h in headers) + " |\n"
         
@@ -79,34 +86,25 @@ SQL Query:"""
 
     def _clean_sql_query(self, raw_query: str, single_line: bool = False) -> str:
         """Membersihkan output query SQL dari backtick, Markdown, dan format ulang untuk kejelasan."""
-        # Hapus backtick, penanda Markdown (```sql atau ```), dan semicolon tambahan
         cleaned_query = re.sub(r'```sql|```|;+\s*$', '', raw_query)
-        
-        # Hapus baris kosong berlebih dan normalisasi whitespace
         cleaned_query = ' '.join(line.strip() for line in cleaned_query.splitlines() if line.strip())
-        
-        # Format ulang query menggunakan sqlparse
         formatted_query = sqlparse.format(
             cleaned_query,
-            reindent=True,           # Indentasi rapi
-            keyword_case='upper',    # Kata kunci SQL huruf besar
-            identifier_case='lower', # Identifier huruf kecil
-            indent_width=2,          # Indentasi 2 spasi
-            use_space_around_operators=True, # Spasi di sekitar operator
-            wrap_after=80            # Batas lebar baris
+            reindent=True,
+            keyword_case='upper',
+            identifier_case='lower',
+            indent_width=2,
+            use_space_around_operators=True,
+            wrap_after=80
         )
-        
-        # Jika single_line=True, ubah ke satu baris
         if single_line:
             formatted_query = ' '.join(formatted_query.split())
-        
-        # Hapus whitespace berlebih di akhir
         return formatted_query.strip()
 
     async def generate_sql(
         self,
         prompt: str,
-        database_name: Optional[str] = None,
+        id_datasource: int,
         table_names: Optional[List[str]] = None
     ) -> tuple[str, float]:
         """
@@ -114,30 +112,34 @@ SQL Query:"""
         
         Args:
             prompt: Prompt dalam bahasa Indonesia
-            database_name: Nama database (opsional)
+            id_datasource: ID unik datasource
             table_names: List nama tabel yang relevan (opsional)
             
         Returns:
             tuple[str, float]: (SQL query yang dihasilkan, skor kepercayaan)
         """
-        # Dapatkan informasi skema database
-        schema = get_table_schema()
+        # Ambil informasi datasource
+        datasource_info = get_datasource_info(id_datasource)
+        db_name = datasource_info['db_name']
         
-        # Filter tabel jika specified
+        # Dapatkan informasi skema database
+        schema = get_table_schema(id_datasource=id_datasource)
+        
+        # Filter tabel jika table_names disediakan
         if table_names:
             schema = [s for s in schema if s['table_name'] in table_names]
-        
+        # Jika table_names tidak disediakan, gunakan semua tabel dan tambahkan instruksi ke prompt
+        else:
+            prompt = f"{prompt} (pilih tabel yang paling relevan dari skema yang diberikan)"
+
         # Format informasi skema
         schema_info = self._format_schema_info(schema)
         
         # Dapatkan sampel data untuk setiap tabel
         sample_data = ""
         for table in schema:
-            table_data = get_table_sample_data(table['table_name'], limit=3)
+            table_data = get_table_sample_data(table['table_name'], id_datasource=id_datasource, limit=3)
             sample_data += self._format_sample_data(table['table_name'], table_data)
-        
-        # Gunakan nama database dari input atau default ke konfigurasi
-        db_name = database_name if database_name else settings.DB_NAME
         
         # Generate SQL menggunakan LangChain
         result = await self.chain.ainvoke({
@@ -147,15 +149,17 @@ SQL Query:"""
             "user_prompt": prompt
         })
         
-        # Extract SQL query dan bersihkan (default multi-line)
+        # Extract SQL query dan bersihkan
         sql_query = self._clean_sql_query(result['text'], single_line=False)
         
-        # Hitung confidence score sederhana
+        # Hitung confidence score sederhana (kurangi jika table_names tidak disediakan)
         confidence_score = min(1.0, len(sql_query) / 50)  # Base score
         common_clauses = ['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY']
         for clause in common_clauses:
             if clause in sql_query.upper():
                 confidence_score += 0.1
+        if not table_names:
+            confidence_score *= 0.9  # Kurangi skor jika tabel tidak ditentukan
         confidence_score = min(1.0, confidence_score)
         
         return sql_query, confidence_score
