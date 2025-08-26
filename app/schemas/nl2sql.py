@@ -9,6 +9,7 @@ class NL2SQLRequest(BaseModel):
         prompt (str): Prompt dalam bahasa natural (Bahasa Indonesia)
         id_datasource (int): ID unik untuk datasource yang akan diquery
         table_names (Optional[list[str]]): List nama tabel yang relevan (opsional)
+        session_id (Optional[str]): ID sesi chat untuk context history (opsional)
     """
     prompt: str = Field(
         ...,
@@ -23,6 +24,11 @@ class NL2SQLRequest(BaseModel):
     table_names: Optional[List[str]] = Field(
         None,
         description="List nama tabel yang relevan (opsional)"
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="ID sesi chat untuk context history (opsional)",
+        example="session_123"
     )
 
 class NL2SQLResponse(BaseModel):

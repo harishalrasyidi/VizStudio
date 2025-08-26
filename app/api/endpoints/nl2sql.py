@@ -47,7 +47,8 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
         sql_query, confidence_score = await nl2sql_service.generate_sql(
             prompt=request.prompt,
             id_datasource=request.id_datasource,
-            table_names=request.table_names
+            table_names=request.table_names,
+            session_id=getattr(request, 'session_id', None)
         )
         
         # Perbarui run dengan output jika tracing berhasil

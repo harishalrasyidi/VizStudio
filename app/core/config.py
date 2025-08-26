@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     DB_NAME: str
     DB_USER: str
     DB_PASSWORD: str
+    
+    # Database URLs (optional, alternative format)
+    DATABASE_URL: Optional[str] = None
+
+    # Chat Database Settings (optional, if not provided will use main DB)
+    CHAT_DATABASE_URL: Optional[str] = None
 
     # LangSmith Settings
     LANGCHAIN_API_KEY: Optional[str] = None
