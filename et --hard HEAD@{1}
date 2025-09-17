@@ -1,0 +1,12 @@
+[33m51eae8e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mpromtai[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{0}: pull origin main: Fast-forward
+[33m5516f05[m[33m ([m[1;31morigin/promtai[m[33m)[m HEAD@{1}: commit: chore: Mengubah input promt dari nama_table menjadi id_datasource dari database eksisting
+[33m3a9018e[m HEAD@{2}: pull origin main: Merge made by the 'ort' strategy.
+[33m6d578db[m HEAD@{3}: commit: pull
+[33mf5cacd5[m HEAD@{4}: pull origin main: updating HEAD
+[33mf5cacd5[m HEAD@{5}: pull origin main: updating HEAD
+[33mf5cacd5[m HEAD@{6}: commit: PUSH:analisis with chain flow 1
+[33m7badbc4[m HEAD@{7}: commit: PUSH:analisis with chain flow 1
+[33m0977671[m HEAD@{8}: commit: PUSH:analisis data berdasarkan query
+[33m9c43543[m HEAD@{9}: commit: FEAT: menambahkan template promt dibagian nl2sql_services
+[33mab06b02[m[33m ([m[1;32mmain[m[33m)[m HEAD@{10}: checkout: moving from main to promtai
+[33mab06b02[m[33m ([m[1;32mmain[m[33m)[m HEAD@{11}: clone: from https://github.com/harishalrasyidi/VizStudio.git
