@@ -1,4 +1,3 @@
-# api/endpoints/nl2sql.py
 from fastapi import APIRouter, HTTPException, Depends
 from app.schemas import NL2SQLRequest, NL2SQLResponse
 from app.services.nl2sql_service import NL2SQLService
@@ -11,13 +10,12 @@ import logging
 import json
 from sqlalchemy import text
 
-# Konfigurasi logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 nl2sql_service = NL2SQLService()
-model = SentenceTransformer('paraphrase-mpnet-base-v2')  # Model dengan dimensi 768
+model = SentenceTransformer('paraphrase-mpnet-base-v2')  # Dimensi 768
 
 async def retrieve_knowledge(prompt: str, id_datasource: int):
     """
@@ -40,7 +38,7 @@ async def retrieve_knowledge(prompt: str, id_datasource: int):
             ORDER BY embedding <-> :embedding 
             LIMIT 5;
         """)
-        # Format embedding sebagai string '[0.1,0.2,...]' untuk pgvector
+        # Format embedding sebagai string '[0.1,0.2,...]'
         embedding_str = '[' + ','.join(map(str, embedding)) + ']'
         results = conn.execute(query, {"id_datasource": id_datasource, "embedding": embedding_str}).fetchall()
         conn.close()
@@ -51,21 +49,8 @@ async def retrieve_knowledge(prompt: str, id_datasource: int):
 
 @router.post("/convert", response_model=NL2SQLResponse)
 async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
-    """
-    Mengkonversi prompt bahasa natural menjadi query SQL dan memberikan analisis tekstual.
-    
-    Args:
-        request: Request body yang berisi prompt, id_datasource, dan parameter opsional
-        
-    Returns:
-        NL2SQLResponse: Response yang berisi query SQL, skor kepercayaan, penjelasan, dan analisis tekstual
-        
-    Raises:
-        HTTPException: Jika terjadi error dalam proses konversi atau analisis
-    """
     run = None
     try:
-        # Coba buat run untuk tracing (opsional)
         try:
             run = langsmith_client.create_run(
                 name="nl2sql_conversion",
@@ -94,13 +79,11 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             session_id=getattr(request, 'session_id', None)
         )
         
-        # Perbarui run dengan output jika tracing berhasil
         if run is not None:
             run.update(
                 outputs={"sql_query": sql_query, "confidence_score": confidence_score}
             )
 
-        # Eksekusi query untuk mendapatkan data
         try:
             data = execute_query(sql_query, request.id_datasource)
             analysis = analyze_data_with_llm(data) if data else "Tidak ada data yang tersedia untuk dianalisis."
@@ -108,10 +91,8 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             logger.error(f"Error executing query {sql_query}: {str(e)}")
             analysis = f"Error: Query gagal dieksekusi. Periksa query: {sql_query}. Error: {str(e)}"
 
-        # Rekomendasi tipe diagram menggunakan LLM
         recommendation = await recommend_chart_type(sql_query, data, enriched_prompt)
 
-        # Buat response dengan rekomendasi
         return NL2SQLResponse(
             sql_query=sql_query,
             confidence_score=confidence_score,
