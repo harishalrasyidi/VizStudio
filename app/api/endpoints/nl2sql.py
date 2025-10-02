@@ -1,10 +1,15 @@
+# api/endpoints/nl2sql.py
 from fastapi import APIRouter, HTTPException, Depends
 from app.schemas import NL2SQLRequest, NL2SQLResponse
 from app.services.nl2sql_service import NL2SQLService
 from app.services.db_services import execute_query
 from app.services.llm_services import analyze_data_with_llm
 from app.core.langsmith import langsmith_client
+from app.db.utils import get_db_connection
+from sentence_transformers import SentenceTransformer
 import logging
+import json
+from sqlalchemy import text
 
 # Konfigurasi logging
 logging.basicConfig(level=logging.INFO)
@@ -12,6 +17,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 nl2sql_service = NL2SQLService()
+model = SentenceTransformer('paraphrase-mpnet-base-v2')  # Model dengan dimensi 768
+
+async def retrieve_knowledge(prompt: str, id_datasource: int):
+    """
+    Retrieve knowledge relevan dari tabel knowledge_base menggunakan vector similarity.
+    
+    Args:
+        prompt (str): Prompt pengguna.
+        id_datasource (int): ID datasource untuk filter.
+    
+    Returns:
+        List[Dict]: Daftar term dan content yang relevan.
+    """
+    try:
+        embedding = model.encode(prompt).tolist()
+        conn = get_db_connection(id_datasource)
+        query = text("""
+            SELECT term, content 
+            FROM knowledge_base 
+            WHERE id_datasource = :id_datasource 
+            ORDER BY embedding <-> :embedding 
+            LIMIT 5;
+        """)
+        # Format embedding sebagai string '[0.1,0.2,...]' untuk pgvector
+        embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+        results = conn.execute(query, {"id_datasource": id_datasource, "embedding": embedding_str}).fetchall()
+        conn.close()
+        return [{"term": row.term, "content": row.content} for row in results]
+    except Exception as e:
+        logger.error(f"Error retrieving knowledge: {str(e)}")
+        return []
 
 @router.post("/convert", response_model=NL2SQLResponse)
 async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
@@ -43,9 +79,16 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             logger.warning(f"Gagal menghubungkan ke LangSmith: {str(e)}, melanjutkan tanpa tracing.")
             run = None
 
+        # Retrieve knowledge relevan untuk memperkaya prompt
+        knowledge = await retrieve_knowledge(request.prompt, request.id_datasource)
+        enriched_prompt = request.prompt + "\n\nKonteks Bisnis:\n" + "\n".join(
+            [f"- {k['term']}: {k['content']}" for k in knowledge]
+        )
+        logger.info(f"Enriched Prompt: {enriched_prompt}")
+
         # Generate SQL query
         sql_query, confidence_score = await nl2sql_service.generate_sql(
-            prompt=request.prompt,
+            prompt=enriched_prompt,
             id_datasource=request.id_datasource,
             table_names=request.table_names,
             session_id=getattr(request, 'session_id', None)
@@ -66,7 +109,7 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             analysis = f"Error: Query gagal dieksekusi. Periksa query: {sql_query}. Error: {str(e)}"
 
         # Rekomendasi tipe diagram menggunakan LLM
-        recommendation = await recommend_chart_type(sql_query, data, request.prompt)
+        recommendation = await recommend_chart_type(sql_query, data, enriched_prompt)
 
         # Buat response dengan rekomendasi
         return NL2SQLResponse(
@@ -135,7 +178,6 @@ Rekomendasikan tipe diagram yang paling cocok (bar, line, pie, table) dan berika
 
     # Parse hasil LLM (asumsikan format JSON sederhana)
     try:
-        import json
         recommendation = json.loads(result.strip())
         return recommendation
     except:
@@ -148,3 +190,5 @@ Rekomendasikan tipe diagram yang paling cocok (bar, line, pie, table) dan berika
             return {"recommended_type": "bar", "reason": "Data agregasi dengan kolom kategorikal dan numerik, cocok untuk bar chart."}
         else:
             return {"recommended_type": "table", "reason": "Data kompleks, tampilkan sebagai tabel."}
+        
+        
