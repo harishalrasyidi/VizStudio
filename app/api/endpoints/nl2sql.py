@@ -4,7 +4,7 @@ from app.services.nl2sql_service import NL2SQLService
 from app.services.db_services import execute_query
 from app.services.llm_services import analyze_data_with_llm
 from app.core.langsmith import langsmith_client
-from app.db.utils import get_db_connection
+from app.db.database import get_db_connection
 from sentence_transformers import SentenceTransformer
 import logging
 import json
@@ -29,22 +29,50 @@ async def retrieve_knowledge(prompt: str, id_datasource: int):
         List[Dict]: Daftar term dan content yang relevan.
     """
     try:
+        logger.info(f"Retrieving knowledge for prompt: {prompt[:50]}... with id_datasource: {id_datasource}")
+        
+        # Generate embedding
         embedding = model.encode(prompt).tolist()
-        conn = get_db_connection(id_datasource)
+        logger.info(f"Generated embedding with dimension: {len(embedding)}")
+        
+        # Koneksi ke database toolsBI (bukan ke datasource eksternal)
+        conn = get_db_connection()
+        logger.info("Connected to toolsBI database successfully")
+        
+        # Cek apakah tabel knowledge_base ada
+        table_check = conn.execute(text("SELECT to_regclass('public.knowledge_base')")).scalar()
+        if table_check is None:
+            logger.error("Tabel knowledge_base tidak ditemukan di database!")
+            conn.close()
+            return []
+        
+        # Query untuk mendapatkan knowledge yang relevan
+        # Format embedding sebagai string '[0.1,0.2,...]' untuk pgvector
+        embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+        logger.info(f"Executing knowledge retrieval query for id_datasource: {id_datasource}")
+        
         query = text("""
             SELECT term, content 
             FROM knowledge_base 
             WHERE id_datasource = :id_datasource 
-            ORDER BY embedding <-> :embedding 
+            ORDER BY embedding <-> :embedding_vector
             LIMIT 5;
         """)
-        # Format embedding sebagai string '[0.1,0.2,...]'
-        embedding_str = '[' + ','.join(map(str, embedding)) + ']'
-        results = conn.execute(query, {"id_datasource": id_datasource, "embedding": embedding_str}).fetchall()
+        
+        results = conn.execute(query, {
+            "id_datasource": id_datasource, 
+            "embedding_vector": embedding_str
+        }).fetchall()
         conn.close()
-        return [{"term": row.term, "content": row.content} for row in results]
+        
+        knowledge_list = [{"term": row.term, "content": row.content} for row in results]
+        logger.info(f"Retrieved {len(knowledge_list)} knowledge entries")
+        
+        return knowledge_list
+        
     except Exception as e:
         logger.error(f"Error retrieving knowledge: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
         return []
 
 @router.post("/convert", response_model=NL2SQLResponse)
