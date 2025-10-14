@@ -13,3 +13,4 @@ python-multipart>=0.0.6
 sqlalchemy>=2.0.23
 sqlparse==0.5.1
 langsmith
+sentence-transformers>=2.2.2

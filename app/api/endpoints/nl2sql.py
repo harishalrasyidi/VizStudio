@@ -4,32 +4,81 @@ from app.services.nl2sql_service import NL2SQLService
 from app.services.db_services import execute_query
 from app.services.llm_services import analyze_data_with_llm
 from app.core.langsmith import langsmith_client
+from app.db.database import get_db_connection
+from sentence_transformers import SentenceTransformer
 import logging
+import json
+from sqlalchemy import text
 
-# Konfigurasi logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 nl2sql_service = NL2SQLService()
+model = SentenceTransformer('paraphrase-mpnet-base-v2')  # Dimensi 768
+
+async def retrieve_knowledge(prompt: str, id_datasource: int):
+    """
+    Retrieve knowledge relevan dari tabel knowledge_base menggunakan vector similarity.
+    
+    Args:
+        prompt (str): Prompt pengguna.
+        id_datasource (int): ID datasource untuk filter.
+    
+    Returns:
+        List[Dict]: Daftar term dan content yang relevan.
+    """
+    try:
+        logger.info(f"Retrieving knowledge for prompt: {prompt[:50]}... with id_datasource: {id_datasource}")
+        
+        # Generate embedding
+        embedding = model.encode(prompt).tolist()
+        logger.info(f"Generated embedding with dimension: {len(embedding)}")
+        
+        # Koneksi ke database toolsBI (bukan ke datasource eksternal)
+        conn = get_db_connection()
+        logger.info("Connected to toolsBI database successfully")
+        
+        # Cek apakah tabel knowledge_base ada
+        table_check = conn.execute(text("SELECT to_regclass('public.knowledge_base')")).scalar()
+        if table_check is None:
+            logger.error("Tabel knowledge_base tidak ditemukan di database!")
+            conn.close()
+            return []
+        
+        # Query untuk mendapatkan knowledge yang relevan
+        # Format embedding sebagai string '[0.1,0.2,...]' untuk pgvector
+        embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+        logger.info(f"Executing knowledge retrieval query for id_datasource: {id_datasource}")
+        
+        query = text("""
+            SELECT term, content 
+            FROM knowledge_base 
+            WHERE id_datasource = :id_datasource 
+            ORDER BY embedding <-> :embedding_vector
+            LIMIT 5;
+        """)
+        
+        results = conn.execute(query, {
+            "id_datasource": id_datasource, 
+            "embedding_vector": embedding_str
+        }).fetchall()
+        conn.close()
+        
+        knowledge_list = [{"term": row.term, "content": row.content} for row in results]
+        logger.info(f"Retrieved {len(knowledge_list)} knowledge entries")
+        
+        return knowledge_list
+        
+    except Exception as e:
+        logger.error(f"Error retrieving knowledge: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        return []
 
 @router.post("/convert", response_model=NL2SQLResponse)
 async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
-    """
-    Mengkonversi prompt bahasa natural menjadi query SQL dan memberikan analisis tekstual.
-    
-    Args:
-        request: Request body yang berisi prompt, id_datasource, dan parameter opsional
-        
-    Returns:
-        NL2SQLResponse: Response yang berisi query SQL, skor kepercayaan, penjelasan, dan analisis tekstual
-        
-    Raises:
-        HTTPException: Jika terjadi error dalam proses konversi atau analisis
-    """
     run = None
     try:
-        # Coba buat run untuk tracing (opsional)
         try:
             run = langsmith_client.create_run(
                 name="nl2sql_conversion",
@@ -43,21 +92,26 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             logger.warning(f"Gagal menghubungkan ke LangSmith: {str(e)}, melanjutkan tanpa tracing.")
             run = None
 
+        # Retrieve knowledge relevan untuk memperkaya prompt
+        knowledge = await retrieve_knowledge(request.prompt, request.id_datasource)
+        enriched_prompt = request.prompt + "\n\nKonteks Bisnis:\n" + "\n".join(
+            [f"- {k['term']}: {k['content']}" for k in knowledge]
+        )
+        logger.info(f"Enriched Prompt: {enriched_prompt}")
+
         # Generate SQL query
         sql_query, confidence_score = await nl2sql_service.generate_sql(
-            prompt=request.prompt,
+            prompt=enriched_prompt,
             id_datasource=request.id_datasource,
             table_names=request.table_names,
             session_id=request.session_id
         )
         
-        # Perbarui run dengan output jika tracing berhasil
         if run is not None:
             run.update(
                 outputs={"sql_query": sql_query, "confidence_score": confidence_score}
             )
 
-        # Eksekusi query untuk mendapatkan data
         try:
             data = execute_query(sql_query, request.id_datasource)
             analysis = analyze_data_with_llm(data) if data else "Tidak ada data yang tersedia untuk dianalisis."
@@ -65,10 +119,8 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             logger.error(f"Error executing query {sql_query}: {str(e)}")
             analysis = f"Error: Query gagal dieksekusi. Periksa query: {sql_query}. Error: {str(e)}"
 
-        # Rekomendasi tipe diagram menggunakan LLM
-        recommendation = await recommend_chart_type(sql_query, data, request.prompt)
+        recommendation = await recommend_chart_type(sql_query, data, enriched_prompt)
 
-        # Buat response dengan rekomendasi
         return NL2SQLResponse(
             sql_query=sql_query,
             confidence_score=confidence_score,
@@ -135,7 +187,6 @@ Rekomendasikan tipe diagram yang paling cocok (bar, line, pie, table) dan berika
 
     # Parse hasil LLM (asumsikan format JSON sederhana)
     try:
-        import json
         recommendation = json.loads(result.strip())
         return recommendation
     except:
@@ -148,3 +199,5 @@ Rekomendasikan tipe diagram yang paling cocok (bar, line, pie, table) dan berika
             return {"recommended_type": "bar", "reason": "Data agregasi dengan kolom kategorikal dan numerik, cocok untuk bar chart."}
         else:
             return {"recommended_type": "table", "reason": "Data kompleks, tampilkan sebagai tabel."}
+        
+        
