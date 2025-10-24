@@ -6,6 +6,7 @@ class NL2SQLRequest(BaseModel):
     id_datasource: int = Field(..., description="ID unik untuk datasource yang akan diquery", example=123)
     table_names: Optional[List[str]] = Field(None, description="List nama tabel yang relevan (opsional)")
     session_id: Optional[str] = Field(None, description="ID sesi chat untuk context history (opsional)", example="session_123")
+    user_id: Optional[int] = Field(None, description="ID user untuk filter knowledge base (opsional)", example=1)
 
 class NL2SQLResponse(BaseModel):
     sql_query: str = Field(..., description="Query SQL yang dihasilkan", example="SELECT category, SUM(sales) as total_sales FROM sales WHERE YEAR(date) = 2023 GROUP BY category")

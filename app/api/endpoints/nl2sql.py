@@ -6,6 +6,7 @@ from app.services.llm_services import analyze_data_with_llm
 from app.core.langsmith import langsmith_client
 from app.db.database import get_db_connection
 from sentence_transformers import SentenceTransformer
+from typing import Optional
 import logging
 import json
 from sqlalchemy import text
@@ -17,19 +18,21 @@ router = APIRouter()
 nl2sql_service = NL2SQLService()
 model = SentenceTransformer('paraphrase-mpnet-base-v2')  # Dimensi 768
 
-async def retrieve_knowledge(prompt: str, id_datasource: int):
+async def retrieve_knowledge(prompt: str, id_datasource: int, user_id: Optional[int] = None, limit: int = 5):
     """
     Retrieve knowledge relevan dari tabel knowledge_base menggunakan vector similarity.
     
     Args:
         prompt (str): Prompt pengguna.
         id_datasource (int): ID datasource untuk filter.
+        user_id (Optional[int]): ID user untuk filter knowledge milik user tertentu.
+        limit (int): Jumlah maksimal hasil yang dikembalikan (default: 5).
     
     Returns:
         List[Dict]: Daftar term dan content yang relevan.
     """
     try:
-        logger.info(f"Retrieving knowledge for prompt: {prompt[:50]}... with id_datasource: {id_datasource}")
+        logger.info(f"Retrieving knowledge for prompt: {prompt[:50]}... with id_datasource: {id_datasource}, user_id: {user_id}, limit: {limit}")
         
         # Generate embedding
         embedding = model.encode(prompt).tolist()
@@ -49,24 +52,43 @@ async def retrieve_knowledge(prompt: str, id_datasource: int):
         # Query untuk mendapatkan knowledge yang relevan
         # Format embedding sebagai string '[0.1,0.2,...]' untuk pgvector
         embedding_str = '[' + ','.join(map(str, embedding)) + ']'
-        logger.info(f"Executing knowledge retrieval query for id_datasource: {id_datasource}")
+        logger.info(f"Executing knowledge retrieval query for id_datasource: {id_datasource}, user_id: {user_id}")
         
-        query = text("""
-            SELECT term, content 
+        # Build query dengan kondisi dinamis
+        where_conditions = ["id_datasource = :id_datasource"]
+        query_params = {
+            "id_datasource": id_datasource, 
+            "embedding_vector": embedding_str,
+            "limit": limit
+        }
+        
+        # Tambahkan filter user_id jika disediakan
+        if user_id is not None:
+            where_conditions.append("id_user = :user_id")
+            query_params["user_id"] = user_id
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        query = text(f"""
+            SELECT term, content, id_user
             FROM knowledge_base 
-            WHERE id_datasource = :id_datasource 
+            WHERE {where_clause}
             ORDER BY embedding <-> :embedding_vector
-            LIMIT 5;
+            LIMIT :limit;
         """)
         
-        results = conn.execute(query, {
-            "id_datasource": id_datasource, 
-            "embedding_vector": embedding_str
-        }).fetchall()
+        logger.info(f"Final query: {query}")
+        logger.info(f"Query parameters: {query_params}")
+        
+        results = conn.execute(query, query_params).fetchall()
         conn.close()
         
-        knowledge_list = [{"term": row.term, "content": row.content} for row in results]
-        logger.info(f"Retrieved {len(knowledge_list)} knowledge entries")
+        knowledge_list = [{"term": row.term, "content": row.content, "user_id": row.id_user} for row in results]
+        logger.info(f"Retrieved {len(knowledge_list)} knowledge entries from user_id: {user_id if user_id else 'all users'}")
+        
+        # Log detail hasil untuk debugging
+        for i, knowledge in enumerate(knowledge_list):
+            logger.info(f"Knowledge {i+1}: term='{knowledge['term']}', user_id={knowledge['user_id']}")
         
         return knowledge_list
         
@@ -93,11 +115,17 @@ async def convert_nl_to_sql(request: NL2SQLRequest) -> NL2SQLResponse:
             run = None
 
         # Retrieve knowledge relevan untuk memperkaya prompt
-        knowledge = await retrieve_knowledge(request.prompt, request.id_datasource)
+        knowledge = await retrieve_knowledge(
+            prompt=request.prompt, 
+            id_datasource=request.id_datasource,
+            user_id=request.user_id,
+            limit=5
+        )
         enriched_prompt = request.prompt + "\n\nKonteks Bisnis:\n" + "\n".join(
             [f"- {k['term']}: {k['content']}" for k in knowledge]
         )
         logger.info(f"Enriched Prompt: {enriched_prompt}")
+        logger.info(f"Retrieved {len(knowledge)} knowledge entries for user_id: {request.user_id}")
 
         # Generate SQL query
         sql_query, confidence_score = await nl2sql_service.generate_sql(
