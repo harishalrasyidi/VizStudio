@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import api_router
-from app.core.langsmith import langsmith_client  # Impor variabel global
+from app.core.langsmith import langsmith_client
 from dotenv import load_dotenv
 import os
 
@@ -14,16 +14,14 @@ app = FastAPI(
     version=settings.APP_VERSION
 )
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],  # Ganti dengan origin frontend di production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API router
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")

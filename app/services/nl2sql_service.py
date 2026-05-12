@@ -9,9 +9,11 @@ from app.core.config import settings
 from app.db.utils import get_table_schema, get_table_sample_data
 from app.db.chat_database import get_chat_database
 from app.services.db_services import get_datasource_info
+from app.utils.session_utils import validate_or_generate_session_id
 import sqlparse
 import re
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +190,10 @@ SQL Query:"""
             datasource_info = get_datasource_info(id_datasource)
             db_name = datasource_info['db_name']
             
+            # Validate or generate session_id as UUID
+            valid_session_id = validate_or_generate_session_id(session_id)
+            logger.info(f"Using session_id: {valid_session_id} (original: {session_id})")
+            
             # Dapatkan informasi skema database
             schema = get_table_schema(id_datasource=id_datasource)
             
@@ -209,9 +215,9 @@ SQL Query:"""
                 sample_data += self._format_sample_data(table['table_name'], table_data)
 
             # Use chat history if session_id provided
-            if session_id:
+            if valid_session_id:
                 sql_query, confidence_score = await self._generate_with_history(
-                    prompt, db_name, schema_info, sample_data, session_id
+                    prompt, db_name, schema_info, sample_data, valid_session_id
                 )
             else:
                 sql_query, confidence_score = await self._generate_without_history(
@@ -234,22 +240,32 @@ SQL Query:"""
     ) -> tuple[str, float]:
         """Generate SQL with chat history context"""
         try:
-            # Get runnable with message history
-            with_history = self._get_chat_history_runnable(session_id)
+            # Get runnable with message history - run sync operation in thread pool
+            with_history = await asyncio.get_event_loop().run_in_executor(
+                None, 
+                self._get_chat_history_runnable, 
+                session_id
+            )
             
             if not with_history:
                 logger.warning("Failed to create chat history runnable, falling back to no-history mode")
                 return await self._generate_without_history(prompt, db_name, schema_info, sample_data)
             
-            # Invoke with session context
-            raw_response = await with_history.ainvoke(
-                {
-                    "user_prompt": prompt,
-                    "database_name": db_name,
-                    "schema_info": schema_info,
-                    "sample_data": sample_data
-                },
-                config={"configurable": {"session_id": session_id}}
+            # Prepare input for the chain
+            input_data = {
+                "user_prompt": prompt,
+                "database_name": db_name,
+                "schema_info": schema_info,
+                "sample_data": sample_data
+            }
+            
+            # Invoke with session context - run sync operation in thread pool
+            raw_response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: with_history.invoke(
+                    input_data,
+                    config={"configurable": {"session_id": session_id}}
+                )
             )
             
             # Clean and validate the SQL

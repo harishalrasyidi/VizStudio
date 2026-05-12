@@ -6,9 +6,11 @@ langchain-google-genai>=0.0.5
 langchain-postgres>=0.0.6
 langchain-community>=0.0.20
 psycopg2-binary>=2.9.9
+psycopg>=3.1.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-multipart>=0.0.6
 sqlalchemy>=2.0.23
 sqlparse==0.5.1
 langsmith
+sentence-transformers>=2.2.2
